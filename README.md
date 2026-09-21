@@ -486,3 +486,65 @@ The relationship between the AWS components and OS configuration can be viewed a
 **IRQ balancing/RSS** distributes network-processing work across CPU cores.
 
 Together, these mechanisms can help an EC2 instance make better use of its available network performance.
+
+
+# Verifying Instance Type and Nitro System Support
+
+Before configuring ENA, verify whether the EC2 instance is running on the **AWS Nitro System**. The underlying instance architecture affects the available ENA networking capabilities and performance.
+
+Most newer-generation EC2 instance types are Nitro-based, including:
+
+* **General purpose:** M5, M5a, M5n, M6g, T3, and newer generations
+* **Compute optimized:** C5, C5a, C5n, C6g, and newer generations
+* **Memory optimized:** R5, R5a, R5n, R6g, and newer generations
+* **Storage optimized:** D3, I3en, and newer generations
+
+Older instance families such as **M4, C4, R4, and T2** are not based on the Nitro System and have more limited networking capabilities.
+
+## Check the Instance Type
+
+From inside the EC2 instance, you can check the instance type using the EC2 Instance Metadata Service:
+
+```bash
+TOKEN=$(curl -X PUT \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" \
+  -s http://169.254.169.254/latest/api/token)
+
+curl -H "X-aws-ec2-metadata-token: $TOKEN" \
+  -s http://169.254.169.254/latest/meta-data/instance-type
+```
+
+Example:
+
+```text
+m6g.large
+```
+
+You can then check the AWS EC2 documentation to determine whether that instance family uses the Nitro System.
+
+## Check ENA Support from the AWS CLI
+
+If you know the instance ID:
+
+```bash
+aws ec2 describe-instances \
+  --instance-ids i-xxxxxxxxxxxxxxxxx \
+  --query "Reservations[].Instances[].{InstanceType:InstanceType,EnaSupport:EnaSupport}"
+```
+
+Example:
+
+```text
+[
+    {
+        "InstanceType": "m6g.large",
+        "EnaSupport": true
+    }
+]
+```
+
+`EnaSupport: true` indicates that enhanced networking with ENA is enabled for the instance.
+
+> **Note:** ENA support and Nitro System support are related but are not exactly the same thing. The instance family documentation is the authoritative source for determining the underlying instance architecture and supported networking capabilities.
+
+Understanding the **instance type**, **Nitro System**, and **ENA support status** helps establish appropriate expectations for network performance and feature availability before applying the OS-level optimizations described in this guide.
