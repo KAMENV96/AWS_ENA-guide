@@ -548,3 +548,361 @@ Example:
 > **Note:** ENA support and Nitro System support are related but are not exactly the same thing. The instance family documentation is the authoritative source for determining the underlying instance architecture and supported networking capabilities.
 
 Understanding the **instance type**, **Nitro System**, and **ENA support status** helps establish appropriate expectations for network performance and feature availability before applying the OS-level optimizations described in this guide.
+
+
+# Implementing CloudWatch Monitoring for ENA
+
+CloudWatch can be used to monitor EC2 network performance and identify when an instance is approaching or exceeding ENA networking limits.
+
+A useful ENA monitoring setup should track:
+
+* ENA allowance metrics
+* Network throughput
+* Network packet rates
+* Instance resource utilization
+* Application-specific network metrics
+
+## Key ENA-Specific Metrics to Monitor
+
+A CloudWatch dashboard should include widgets for ENA networking limits, network performance, and overall instance health.
+
+### ENA Allowance Metrics
+
+Important ENA-related metrics include:
+
+* `bw_in_allowance_exceeded` — inbound bandwidth allowance exceeded
+* `bw_out_allowance_exceeded` — outbound bandwidth allowance exceeded
+* `pps_allowance_exceeded` — packet-per-second allowance exceeded
+* `conntrack_allowance_exceeded` — connection-tracking allowance exceeded
+* `linklocal_allowance_exceeded` — link-local service allowance exceeded
+
+These metrics are useful for identifying situations where the instance is reaching an EC2 networking allowance.
+
+### Network Throughput
+
+Monitor:
+
+* `NetworkIn` — bytes received by the instance
+* `NetworkOut` — bytes transmitted by the instance
+
+These metrics help determine whether the instance is approaching its available network bandwidth.
+
+### Network Packets
+
+Monitor:
+
+* `NetworkPacketsIn` — packets received
+* `NetworkPacketsOut` — packets transmitted
+
+Packet rates are especially important for workloads that generate a large number of small packets.
+
+### Instance Performance
+
+Monitor:
+
+* `CPUUtilization` — CPU usage
+* Network-related ENA allowance metrics
+* Instance-level resource utilization
+
+High network traffic combined with high CPU utilization can indicate that the workload is becoming CPU-bound rather than network-bound.
+
+### Custom Application Metrics
+
+For applications with strict network-performance requirements, consider publishing custom CloudWatch metrics such as:
+
+* Application network latency
+* Request latency
+* Network error rate
+* Connection failures
+* Retransmission rate
+* Application-level packet processing time
+
+---
+
+# Creating a Comprehensive ENA Monitoring Dashboard
+
+A well-designed CloudWatch dashboard provides at-a-glance visibility into network performance and ENA limits.
+
+Create a dashboard using:
+
+```bash
+# Create a CloudWatch dashboard for ENA monitoring
+
+aws cloudwatch put-dashboard \
+  --dashboard-name "ENA-Performance-Dashboard" \
+  --dashboard-body file://ena-dashboard.json
+```
+
+The `ena-dashboard.json` file defines the widgets displayed on the dashboard.
+
+A typical dashboard layout could contain:
+
+```text
++-------------------------------------------------------+
+|                  ENA Performance                      |
++--------------------------+----------------------------+
+| NetworkIn / NetworkOut   | NetworkPacketsIn/Out       |
++--------------------------+----------------------------+
+| CPUUtilization           | ENA Bandwidth Allowance    |
++--------------------------+----------------------------+
+| PPS Allowance            | Conntrack Allowance        |
++--------------------------+----------------------------+
+| Application Latency      | Application Error Rate     |
++--------------------------+----------------------------+
+```
+
+This makes it easier to correlate network traffic with instance resource utilization and ENA allowance violations.
+
+---
+
+# Monitoring and Alerting on ENA-Specific Metrics
+
+CloudWatch exposes EC2 networking allowance metrics that can indicate when an instance is reaching its networking limits.
+
+### Bandwidth Allowance Exceeded
+
+`bw_in_allowance_exceeded`
+
+Indicates that inbound traffic exceeded the instance's available inbound bandwidth allowance.
+
+`bw_out_allowance_exceeded`
+
+Indicates that outbound traffic exceeded the instance's available outbound bandwidth allowance.
+
+Increasing values can indicate that the workload is approaching the instance's network bandwidth limit.
+
+### Packet-per-Second Allowance
+
+`pps_allowance_exceeded`
+
+Indicates that the instance exceeded its packet-per-second allowance.
+
+This is particularly important for workloads generating many small packets.
+
+For example:
+
+```text
+Large packets
+    ↓
+Fewer packets/sec
+    ↓
+Lower packet-processing overhead
+
+
+Small packets
+    ↓
+More packets/sec
+    ↓
+Higher PPS requirement
+```
+
+An application can therefore experience networking limitations because of PPS even when total bandwidth is not saturated.
+
+### Connection Tracking Allowance
+
+`conntrack_allowance_exceeded`
+
+Indicates that the instance exceeded its connection-tracking allowance.
+
+This can be relevant for workloads with:
+
+* Large numbers of concurrent connections
+* High connection churn
+* NAT-heavy traffic patterns
+* Many short-lived TCP connections
+
+### Link-Local Allowance
+
+`linklocal_allowance_exceeded`
+
+Indicates that the instance exceeded its allowance for link-local traffic.
+
+This can be relevant when an application makes a large number of requests to AWS link-local services, such as the EC2 Instance Metadata Service.
+
+---
+
+# Create CloudWatch Alarms for ENA Metrics
+
+CloudWatch alarms can proactively detect networking allowance problems.
+
+## Alarm for High ENA Bandwidth Allowance
+
+Example:
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name "ENA-Bandwidth-In-Allowance-Exceeded" \
+  --metric-name "bw_in_allowance_exceeded" \
+  --namespace "AWS/EC2" \
+  --statistic "Sum" \
+  --period 60 \
+  --threshold 0 \
+  --comparison-operator "GreaterThanThreshold" \
+  --dimensions Name=InstanceId,Value=i-1234567890abcdef0 \
+  --evaluation-periods 3 \
+  --alarm-actions arn:aws:sns:region:account-id:topic-name
+```
+
+This alarm triggers when the metric records values greater than zero for the configured evaluation periods.
+
+## Alarm for Outbound Bandwidth Allowance
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name "ENA-Bandwidth-Out-Allowance-Exceeded" \
+  --metric-name "bw_out_allowance_exceeded" \
+  --namespace "AWS/EC2" \
+  --statistic "Sum" \
+  --period 60 \
+  --threshold 0 \
+  --comparison-operator "GreaterThanThreshold" \
+  --dimensions Name=InstanceId,Value=i-1234567890abcdef0 \
+  --evaluation-periods 3 \
+  --alarm-actions arn:aws:sns:region:account-id:topic-name
+```
+
+## Alarm for PPS Allowance
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name "ENA-PPS-Allowance-Exceeded" \
+  --metric-name "pps_allowance_exceeded" \
+  --namespace "AWS/EC2" \
+  --statistic "Sum" \
+  --period 60 \
+  --threshold 0 \
+  --comparison-operator "GreaterThanThreshold" \
+  --dimensions Name=InstanceId,Value=i-1234567890abcdef0 \
+  --evaluation-periods 3 \
+  --alarm-actions arn:aws:sns:region:account-id:topic-name
+```
+
+## Alarm for Connection Tracking
+
+```bash
+aws cloudwatch put-metric-alarm \
+  --alarm-name "ENA-Conntrack-Allowance-Exceeded" \
+  --metric-name "conntrack_allowance_exceeded" \
+  --namespace "AWS/EC2" \
+  --statistic "Sum" \
+  --period 60 \
+  --threshold 0 \
+  --comparison-operator "GreaterThanThreshold" \
+  --dimensions Name=InstanceId,Value=i-1234567890abcdef0 \
+  --evaluation-periods 3 \
+  --alarm-actions arn:aws:sns:region:account-id:topic-name
+```
+
+> **Important:** The thresholds above are examples. A value greater than zero may be appropriate for detecting any allowance violation, but production alert thresholds should be based on the application's normal traffic pattern and the severity of the event.
+
+---
+
+# Recommended ENA Monitoring Strategy
+
+A practical monitoring strategy should correlate multiple metrics rather than looking at a single metric in isolation.
+
+For example:
+
+```text
+                Network Traffic
+                      │
+          ┌───────────┴───────────┐
+          ↓                       ↓
+     NetworkIn/Out        NetworkPacketsIn/Out
+          │                       │
+          └───────────┬───────────┘
+                      ↓
+              ENA Allowances
+                      │
+       ┌──────────────┼──────────────┐
+       ↓              ↓              ↓
+   Bandwidth         PPS          Conntrack
+   exceeded        exceeded        exceeded
+       │              │              │
+       └──────────────┼──────────────┘
+                      ↓
+                Application
+                  Metrics
+                      │
+                      ↓
+             Latency / Errors
+```
+
+The goal is to determine **what resource is actually becoming the bottleneck**.
+
+For example:
+
+```text
+High NetworkOut
++
+bw_out_allowance_exceeded > 0
+=
+Possible bandwidth limitation
+```
+
+Whereas:
+
+```text
+Moderate NetworkOut
++
+Very high NetworkPacketsOut
++
+pps_allowance_exceeded > 0
+=
+Possible PPS limitation
+```
+
+And:
+
+```text
+High connection count
++
+conntrack_allowance_exceeded > 0
+=
+Possible connection-tracking limitation
+```
+
+This correlation is more useful than monitoring `NetworkIn` or `NetworkOut` alone.
+
+---
+
+# Recommended Validation
+
+After implementing CloudWatch monitoring, validate the configuration by generating representative network traffic and observing the metrics.
+
+Check the EC2 instance locally:
+
+```bash
+# Network interface statistics
+ip -s link show eth0
+
+# ENA driver information
+ethtool -i eth0
+
+# ENA driver statistics
+ethtool -S eth0
+```
+
+Check CloudWatch metrics:
+
+```bash
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/EC2 \
+  --metric-name NetworkOut \
+  --dimensions Name=InstanceId,Value=i-1234567890abcdef0 \
+  --statistics Average \
+  --period 60 \
+  --start-time 2026-01-01T00:00:00Z \
+  --end-time 2026-01-01T01:00:00Z
+```
+
+For production monitoring, combine:
+
+1. **Network throughput**
+2. **Packet rate**
+3. **ENA allowance metrics**
+4. **CPU utilization**
+5. **Application latency**
+6. **Application error rates**
+
+This allows you to distinguish between a bandwidth bottleneck, PPS limitation, connection-tracking limitation, CPU bottleneck, and application-level performance problem.
